@@ -1,147 +1,137 @@
+local TS = game:GetService("TweenService")
 
 local Minigun = script.Parent
-local TS = game:GetService("TweenService")
+local Crosshair = game.ReplicatedStorage.CrossHair:Clone()
+
+local Player = game.Players.LocalPlayer
+local Character = Player.Character
+
+local IdleAnimation = Instance.new('Animation')
+IdleAnimation.AnimationId = "rbxassetid://17485028538"
+local Anim = Character.Humanoid.Animator:LoadAnimation(IdleAnimation)
+
+local Mouse = Player:GetMouse()
+local MouseIcon = Mouse.Icon
+
+local RemoteEvent = Minigun.Fire
+
+local EquippedBool = false
+local moving
+local MovingIntesity = 10
+
+
+local function Collisions()
+	for i,v in ipairs(Character:GetDescendants()) do
+		if v:isA("BasePart") then
+			v.CollisionGroup = "Player" -- This works by creating a collision group and calling it player and sets every part of the player to the collision group
+		end
+	end
+end
+spawn(Collisions)
+Player.CharacterAdded:Connect(Collisions) -- whenever player respawns
+
+local function WhileEquipping()
+	Crosshair.Position = UDim2.new(0,Mouse.X,0,Mouse.Y) -- Sets the crosshair frame to the position of the mouse (anchor point has to be 0.5,0.5 to make it into the center of the mouse)
+	local PosToLook = Vector3.new(Mouse.Hit.p.X,Character.HumanoidRootPart.CFrame.Y,Mouse.hit.p.Z) -- Gets the target by using mouse.hit.p (position of the mouse in workspace) and root part so it doesn't look at the floor / roof and so doesn't glitch out / look weird  
+	Character.HumanoidRootPart.CFrame = CFrame.lookAt(Character.HumanoidRootPart.Position,PosToLook) --Makes the Target part look at target position using 2 vectors/positions one which is base position and one which should look at
+end
+
+local function Equipped()
+	EquippedBool = true
+	Crosshair.Parent = Player.PlayerGui.CrossHair
+	Character.Humanoid.AutoRotate = false -- This is to make the character not rotate whenever it's being changed
+	Mouse.Icon = "rbxassetid://17485711907" -- Sets the mouse image to invisible to make it so there isn't a mouse on top of the crosshair this works by creating an image making it transparent publishing it on roblox  and then setting the image to mouse using this line
+	Character.Humanoid.WalkSpeed = 10
+	Character.Humanoid.JumpPower = 30 
+	Anim:Play()
+	while EquippedBool do
+		spawn(WhileEquipping)
+		wait()
+	end
+end
+
+local function UnEquipped()
+	EquippedBool = false
+	Character.Humanoid.AutoRotate = true
+	Crosshair.Parent = game.ReplicatedStorage
+	Mouse.Icon = MouseIcon
+	Character.Humanoid.WalkSpeed = game.StarterPlayer.CharacterWalkSpeed -- Returns player back to original walkspeed by getting it from the starterplayer where it's being set
+	Character.Humanoid.JumpPower = game.StarterPlayer.CharacterJumpPower-- Returns player back to original jump power by getting it from the starterplayer where it's being set
+	Anim:Stop()
+end
+
+local TI = TweenInfo.new(0.05,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut)
+local DefaultSize = Crosshair.Size
+
+local TweenIncrease = TS:Create(Crosshair,TI,{Size = UDim2.new(DefaultSize.X.Scale * MovingIntesity,0,DefaultSize.Y.Scale * MovingIntesity,0)})
+local TweenDecrease = TS:Create(Crosshair,TI,{Size = UDim2.new(DefaultSize.X.Scale,0,DefaultSize.Y.Scale,0)})
+
+local function Move(Speed) -- Whenever player's walkspeed get changed this gets fired	
+	if Speed > 5 and not moving then -- Checks if player reached target speed and is already not moving that speed
+		moving = true
+		local SizeMutli = 1
+		TweenDecrease:Cancel()
+		TweenIncrease:Play()
+		for i,v in ipairs(Crosshair:GetChildren()) do
+			if v:IsA("Frame") then
+				if not moving then
+					break
+				end
+				v.Size = UDim2.new(game.ReplicatedStorage.CrossHair[v.Name].Size.X.Scale / MovingIntesity,0,game.ReplicatedStorage.CrossHair[v.Name].Size.Y.Scale / MovingIntesity,0) -- This makes parts of the crosshair (Frames / images) lower size to not make them cover the whole screen
+			end
+		end
+	elseif moving and Speed <= 5 then
+		moving = false
+		TweenIncrease:Cancel()
+		TweenDecrease:Play()
+		wait(0.05)
+		for i,v in ipairs(Crosshair:GetChildren()) do
+			if v:IsA("Frame") then
+				if moving then
+					break
+				end
+				v.Size = UDim2.new(game.ReplicatedStorage.CrossHair[v.Name].Size.X.Scale,0,game.ReplicatedStorage.CrossHair[v.Name].Size.Y.Scale,0) -- sets every frame of the crosshair's size to the original (by getting the 1 that was not being changed in replicatedstroage) whenever player stops moving
+			end
+		end
+	end
+end
+
+Minigun.Equipped:Connect(Equipped)
+Minigun.Unequipped:Connect(UnEquipped)
+Character.Humanoid.Running:Connect(Move)
 
 local Holding
 
-local function GetOrientation(vector) -- Gets where the Bullethole should be orientated based on vector that raycast outputted
-	if vector == Vector3.new(0,0,1) then
-		return Vector3.new(0,0,0)
-	elseif vector == Vector3.new(0,0,-1) then
-		return Vector3.new(0,-180,0)
-	elseif vector == Vector3.new(0,-1,0) then
-		return Vector3.new(90,0,0)
-	elseif vector == Vector3.new(0,1,0) then
-		return Vector3.new(-90,0,0)
-	elseif vector == Vector3.new(1,0,0) then
-		return Vector3.new(0,90,0)
-	elseif vector == Vector3.new(-1,0,0) then
-		return Vector3.new(0,-90,0)
-	else
-		return Vector3.new(0,0,0)
-	end
-end
-
-local function ragdoll(Rig) -- This works using ballsocketconstraint to create funky physics and linear velocity to make it fly to random location
-	for i, v in ipairs(Rig:GetDescendants()) do
-		if v:IsA("Motor6D") then  -- Checks if it is
-			local Attachment1, attachment2 = Instance.new("Attachment"), Instance.new("Attachment") -- Creates 2 attachments to know which parts should have the targetted physics
-			Attachment1.CFrame = v.C0
-			attachment2.CFrame = v.C1
-			Attachment1.Parent = v.Part0
-			attachment2.Parent = v.Part1
-			local BallSocket =game.ReplicatedStorage.BallSocketConstraint:Clone() -- this makes target parts wiggle using the 2 target Parts and assigning attachments to that 2 parts.
-			BallSocket.Attachment0 = Attachment1
-			BallSocket.Attachment1 = attachment2
-			BallSocket.Parent = v.Part0
-		end
-	end
+function to3d(x,y)
+	local pos = game.Workspace.CurrentCamera:ScreenPointToRay(x,y)  -- Gets direction where the raycast should end at 
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude -- This is to know if raycast should either only include those or exclude those set to exclude because we don't want player and player's minigun to be targeted
+	params.CollisionGroup = "Minigun"
+	params.CollisionGroup = "Player" -- This is so the raycast doesnt include the player shooting in it so it doesn't lead to him being damaged
 	
-	local attachemnt = Instance.new("Attachment")
-	attachemnt.Parent = Rig.PrimaryPart
-	attachemnt.CFrame = Rig.PrimaryPart.CFrame
-	local LV = Instance.new("LinearVelocity")
-	LV.MaxForce = 5000 -- This is to make the LinearVelocity more intense the bigger the more intense
-	LV.VectorVelocity = Vector3.new(math.random(1,10) - 5/2,math.random(30,50),math.random(1,10) - 5 /2) -- Gets random direction using RNG where the part should fly
-	LV.Attachment0 = attachemnt -- This is to know which part should it fly
-	LV.Parent = attachemnt
-	
-	wait(0.2)
-	LV:Destroy() -- This is so the part doesn't fly forever by destroying it
-	attachemnt:Destroy()
-end
-
-local function Death(Rig)
-	if Rig then
-		ragdoll(Rig)
-		wait(1.8)
-		for i,v in ipairs(Rig:GetDescendants()) do
-			if v:IsA("BasePart") then
-				local tween = TS:Create(v,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Transparency = 1}) -- Tweens transparency of part to invisible with sine easing style
-				tween:Play() -- Plays the tween that was set before
-			end
-		end
-		wait(2)
-		Rig:Destroy()
-	end
-end
-
-local function PushBack(Character,Direction)
-	if Character then
-		local Attachment = Instance.new("Attachment")
-		Attachment.Parent = Character.HumanoidRootPart
-		local LV = Instance.new("LinearVelocity")
-		LV.MaxForce = 9999
-		LV.Attachment0 = Attachment
-		LV.Parent = Character.HumanoidRootPart
-		LV.VectorVelocity = -Vector3.new(Direction.X,0,Direction.Z)* 50 -- Gets direction where it should push back player
-		wait()
-		LV:Destroy() -- This is so the part doesn't push back to target sides forever by destroying it
-		Attachment:Destroy()
-	end
-end
-
-local RecoilNum = 0 
-local function CancelRecoil()
-	if RecoilNum > 1 then
-		local Current = RecoilNum
-		for i = 1,RecoilNum do
-			if RecoilNum == Current and RecoilNum > 0 then -- Checks if player didnt start recoiling again if not it breaks the loop
-				RecoilNum -= 1
-				Current = RecoilNum
-			else
-				break
-			end
-			wait()
-		end
-	end
-end
-local Shooting
-Minigun.Fire.OnServerEvent:Connect(function(Player,pos,target,Orientation,Direction) -- Fires whenever client fires the remote event
-	local RecoilingUi = Player.PlayerGui.Recoiling.RecoilingText
-	if RecoilNum >= 50 then -- Checks if player has already recoiled (if the recoiling num is or is more than 50 if not then it does what else statement tells it to)
-		Shooting = true
-		RecoilingUi.Visible = false
-		local BulletHole
-		PushBack(Player.Character,Direction)
-		if target and pos and Orientation then -- Checks if the raycast result suceeded or the ray goes to nowhere
-			BulletHole = game.ReplicatedStorage.BulletHole:Clone()
-			BulletHole.Position = pos -- Sets the position to end of the raycast 
-			BulletHole.Orientation = GetOrientation(Orientation)
-			BulletHole.Parent = target
-			local model = target:FindFirstAncestorOfClass('Model') -- Checks if its parented with a model if so it returns first model it finds
-			if model then
-				if model:FindFirstChild("Humanoid") and model ~= Player.Character then
-					if model.Humanoid.Health > 0 then
-						model.Humanoid.Health -= 25
-						if model.Humanoid.Health <= 0 then
-							Death(model)
-						end
-					end
-				end
-			end
-		end
-		wait(5)
-		if BulletHole then
-			BulletHole:Destroy()
-		end
+	local RaycastResult = workspace:Raycast(workspace.CurrentCamera.CFrame.Position,pos.Direction * 500,params) -- Draws a line Between camera and target position using direction, returns what part it is pointing at and more
+	if RaycastResult then
+		return RaycastResult.Position,RaycastResult.Instance,RaycastResult.Normal,pos.Direction
 	else
-		RecoilNum += 1 
-		local Current = RecoilNum
-		RecoilingUi.Visible = true
-		RecoilingUi.Text = "Recoiling: "..RecoilNum.."/50"-- Lets player know how much is left for recoiling by setting text of textlabel to target text
-		wait(0.75)
-		if Current == RecoilNum and Current >= 50 then -- Checks if the recoil num stayed the same and if current is more than 50 or is 50
-			RecoilingUi.Visible = false
-			spawn(CancelRecoil)
+		return pos.Direction*500,nil,nil,pos.Direction -- If it doesn't find a part it returns target position / direction instead
+	end
+end
+
+Mouse.Button1Down:Connect(function()
+	Holding = true
+	while true do
+		task.wait()
+		if Holding and EquippedBool then
+			local random1 = math.random(0,Crosshair.Size.X.Scale*200*2) - (Crosshair.Size.X.Scale*200) -- uses RNG between 0, target number
+			local random2 = math.random(0,Crosshair.Size.Y.Scale*200*2) - (Crosshair.Size.Y.Scale*200) -- uses RNG between 0, target number
+			RemoteEvent:FireServer(to3d(Mouse.X + random1,Mouse.Y + random2)) -- Fires server with the raycast result
+		else
+			Minigun.StopFiring:FireServer()
+			break
 		end
 	end
 end)
 
-Minigun.StopFiring.OnServerEvent:Connect(function()
-	Shooting = false
-	wait(0.75)
-	if not Shooting then
-		spawn(CancelRecoil)
-	end
+Mouse.Button1Up:Connect(function()
+	Holding = false
 end)
