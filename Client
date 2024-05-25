@@ -1,0 +1,147 @@
+
+local Minigun = script.Parent
+local TS = game:GetService("TweenService")
+
+local Holding
+
+local function GetOrientation(vector) -- Gets where the Bullethole should be orientated based on vector that raycast outputted
+	if vector == Vector3.new(0,0,1) then
+		return Vector3.new(0,0,0)
+	elseif vector == Vector3.new(0,0,-1) then
+		return Vector3.new(0,-180,0)
+	elseif vector == Vector3.new(0,-1,0) then
+		return Vector3.new(90,0,0)
+	elseif vector == Vector3.new(0,1,0) then
+		return Vector3.new(-90,0,0)
+	elseif vector == Vector3.new(1,0,0) then
+		return Vector3.new(0,90,0)
+	elseif vector == Vector3.new(-1,0,0) then
+		return Vector3.new(0,-90,0)
+	else
+		return Vector3.new(0,0,0)
+	end
+end
+
+local function ragdoll(Rig) -- This works using ballsocketconstraint to create funky physics and linear velocity to make it fly to random location
+	for i, v in ipairs(Rig:GetDescendants()) do
+		if v:IsA("Motor6D") then  -- Checks if it is
+			local Attachment1, attachment2 = Instance.new("Attachment"), Instance.new("Attachment") -- Creates 2 attachments to know which parts should have the targetted physics
+			Attachment1.CFrame = v.C0
+			attachment2.CFrame = v.C1
+			Attachment1.Parent = v.Part0
+			attachment2.Parent = v.Part1
+			local BallSocket =game.ReplicatedStorage.BallSocketConstraint:Clone() -- this makes target parts wiggle using the 2 target Parts and assigning attachments to that 2 parts.
+			BallSocket.Attachment0 = Attachment1
+			BallSocket.Attachment1 = attachment2
+			BallSocket.Parent = v.Part0
+		end
+	end
+	
+	local attachemnt = Instance.new("Attachment")
+	attachemnt.Parent = Rig.PrimaryPart
+	attachemnt.CFrame = Rig.PrimaryPart.CFrame
+	local LV = Instance.new("LinearVelocity")
+	LV.MaxForce = 5000 -- This is to make the LinearVelocity more intense the bigger the more intense
+	LV.VectorVelocity = Vector3.new(math.random(1,10) - 5/2,math.random(30,50),math.random(1,10) - 5 /2) -- Gets random direction using RNG where the part should fly
+	LV.Attachment0 = attachemnt -- This is to know which part should it fly
+	LV.Parent = attachemnt
+	
+	wait(0.2)
+	LV:Destroy() -- This is so the part doesn't fly forever by destroying it
+	attachemnt:Destroy()
+end
+
+local function Death(Rig)
+	if Rig then
+		ragdoll(Rig)
+		wait(1.8)
+		for i,v in ipairs(Rig:GetDescendants()) do
+			if v:IsA("BasePart") then
+				local tween = TS:Create(v,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Transparency = 1}) -- Tweens transparency of part to invisible with sine easing style
+				tween:Play() -- Plays the tween that was set before
+			end
+		end
+		wait(2)
+		Rig:Destroy()
+	end
+end
+
+local function PushBack(Character,Direction)
+	if Character then
+		local Attachment = Instance.new("Attachment")
+		Attachment.Parent = Character.HumanoidRootPart
+		local LV = Instance.new("LinearVelocity")
+		LV.MaxForce = 9999
+		LV.Attachment0 = Attachment
+		LV.Parent = Character.HumanoidRootPart
+		LV.VectorVelocity = -Vector3.new(Direction.X,0,Direction.Z)* 50 -- Gets direction where it should push back player
+		wait()
+		LV:Destroy() -- This is so the part doesn't push back to target sides forever by destroying it
+		Attachment:Destroy()
+	end
+end
+
+local RecoilNum = 0 
+local function CancelRecoil()
+	if RecoilNum > 1 then
+		local Current = RecoilNum
+		for i = 1,RecoilNum do
+			if RecoilNum == Current and RecoilNum > 0 then -- Checks if player didnt start recoiling again if not it breaks the loop
+				RecoilNum -= 1
+				Current = RecoilNum
+			else
+				break
+			end
+			wait()
+		end
+	end
+end
+local Shooting
+Minigun.Fire.OnServerEvent:Connect(function(Player,pos,target,Orientation,Direction) -- Fires whenever client fires the remote event
+	local RecoilingUi = Player.PlayerGui.Recoiling.RecoilingText
+	if RecoilNum >= 50 then -- Checks if player has already recoiled (if the recoiling num is or is more than 50 if not then it does what else statement tells it to)
+		Shooting = true
+		RecoilingUi.Visible = false
+		local BulletHole
+		PushBack(Player.Character,Direction)
+		if target and pos and Orientation then -- Checks if the raycast result suceeded or the ray goes to nowhere
+			BulletHole = game.ReplicatedStorage.BulletHole:Clone()
+			BulletHole.Position = pos -- Sets the position to end of the raycast 
+			BulletHole.Orientation = GetOrientation(Orientation)
+			BulletHole.Parent = target
+			local model = target:FindFirstAncestorOfClass('Model') -- Checks if its parented with a model if so it returns first model it finds
+			if model then
+				if model:FindFirstChild("Humanoid") and model ~= Player.Character then
+					if model.Humanoid.Health > 0 then
+						model.Humanoid.Health -= 25
+						if model.Humanoid.Health <= 0 then
+							Death(model)
+						end
+					end
+				end
+			end
+		end
+		wait(5)
+		if BulletHole then
+			BulletHole:Destroy()
+		end
+	else
+		RecoilNum += 1 
+		local Current = RecoilNum
+		RecoilingUi.Visible = true
+		RecoilingUi.Text = "Recoiling: "..RecoilNum.."/50"-- Lets player know how much is left for recoiling by setting text of textlabel to target text
+		wait(0.75)
+		if Current == RecoilNum and Current >= 50 then -- Checks if the recoil num stayed the same and if current is more than 50 or is 50
+			RecoilingUi.Visible = false
+			spawn(CancelRecoil)
+		end
+	end
+end)
+
+Minigun.StopFiring.OnServerEvent:Connect(function()
+	Shooting = false
+	wait(0.75)
+	if not Shooting then
+		spawn(CancelRecoil)
+	end
+end)
